@@ -1,7 +1,7 @@
 #! banker_dom.py
 # a class for managing game state details
 import json
-from typing import Optional
+from typing import Optional, List
 from datetime import datetime
 
 
@@ -35,7 +35,7 @@ class Faction:
         self.assets = assets
 
 class Vote:
-    def __init__(self, player_id: int, choice: str, timestamp: float):
+    def __init__(self, player_id: int, choice: str, timestamp: int):
         self.player_id = player_id
         self.choice = choice
         self.timestamp = timestamp
@@ -90,6 +90,12 @@ class Game:
                 return faction
         return None
 
+    def get_living_player_ids(self) -> List[str]:
+        game_player_ids = []
+        for player in self.players:
+            game_player_ids.append(str(player.player_id))
+        return game_player_ids
+
     def add_round(self, a_round: Round):
         self.rounds.append(a_round)
 
@@ -109,7 +115,7 @@ class Game:
         return latest_round
 
 def read_json_to_dom(filepath: str) -> Game:
-    with open(filepath, 'r') as openfile:
+    with open(filepath, 'r', encoding="utf8") as openfile:
         json_object = json.load(openfile)
 
         is_active = json_object.get("is_active")
@@ -169,7 +175,7 @@ def read_json_to_dom(filepath: str) -> Game:
         return Game(is_active, factions, players, rounds)
 
 def write_dom_to_json(game: Game, filepath: str):
-    with open(filepath, 'w') as outfile:
+    with open(filepath, 'w', encoding="utf8") as outfile:
 
         #convert Game to dictionary here
         game_dict = {"is_active": game.is_active}
@@ -186,7 +192,7 @@ def write_dom_to_json(game: Game, filepath: str):
                                  "player_discord_name": player.player_discord_name,
                                  "faction_name": player.faction_name,
                                  "assets": player.assets,
-                                 "tensions": player.tension,
+                                 "tension": player.tension,
                                  "withdraw_limit": player.withdraw_limit,
                                  "daily_withdraw_available": player.daily_withdraw_available,
                                  "is_faction_boss": player.is_faction_boss,
@@ -205,5 +211,4 @@ def write_dom_to_json(game: Game, filepath: str):
                                 "is_active_round": a_round.is_active_round,
                                 "votes": vote_dicts})
         game_dict["rounds"] = round_dicts
-        json.dump(game_dict, outfile, indent=2)
-
+        json.dump(game_dict, outfile, indent=2, ensure_ascii=False)

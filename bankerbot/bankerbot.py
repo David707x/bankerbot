@@ -14,6 +14,9 @@ load_dotenv()
 TOKEN = os.getenv('DISCORD_TOKEN')
 GUILD_ID = int(os.getenv('GUILD_ID'))
 PLAYER_ROLE_ID = int(os.getenv('PLAYER_ROLE_ID'))
+VOTE_CHANNEL = int(os.getenv('VOTE_CHANNEL'))
+MODERATOR_ACTION_CHANNEL = int(os.getenv('MODERATOR_ACTION_CHANNEL'))
+MODERATOR_ROLE_ID = int(os.getenv('MODERATOR_ROLE_ID'))
 BASE_PATH = os.getenv('BASE_PATH')
 
 game_factions = Literal["Van der Linde Gang",
@@ -88,11 +91,26 @@ async def post_embed(interaction: discord.Interaction,
     log_interaction_call(interaction)
     embed_list = embed_builder.get_embed_dict().get(embed)
 
-    await interaction.response.send_message(f"Current region control standings:")
+    await interaction.response.send_message(f"Post embed to channel {channel.name}", ephemeral=True)
 
     for embed_to_post in embed_list:
         await channel.send(embed=embed_to_post)
 
+@tree.command(name="clear-messages",
+              description="Clears up to 100 messages out of a discord channel",
+              guild=discord.Object(id=GUILD_ID))
+@app_commands.default_permissions(manage_guild=True)
+async def clear_messages(interaction: discord.Interaction,
+                         channel: discord.TextChannel,
+                         channel_again: discord.TextChannel
+                     ):
+    log_interaction_call(interaction)
+
+    if channel != channel_again:
+        await interaction.response.send_message(f"Both channel arguments must be the same! This is a safety feature!")
+
+    await interaction.response.send_message(f"Clearing messages from channel {channel.name}")
+    await channel.purge(limit=100)
 
 @tree.command(name="add-faction",
               description="Adds a faction to the game",
@@ -210,41 +228,42 @@ async def end_round(interaction: discord.Interaction):
               description="Toggles a player status of being incarcerated or not.",
               guild=discord.Object(id=GUILD_ID))
 @app_commands.default_permissions(manage_guild=True)
+@app_commands.autocomplete(player=player_list_autocomplete)
 async def incarcerate_player(interaction: discord.Interaction,
-                     player: discord.Member,
-                     incarcerated: Literal['True', 'False']):
+                             player: str,
+                             incarcerated: Literal['True', 'False']):
     log_interaction_call(interaction)
     game = await get_game(BASE_PATH)
 
-    this_player = game.get_player(player.id)
+    this_player = game.get_player(int(player))
     if this_player is None:
-        await interaction.response.send_message(f'Player {player.name} is not currently defined in this game!',
+        await interaction.response.send_message(f'The selected player is not currently defined in this game!',
                                                 ephemeral=True)
     else:
         this_player.is_incarcerated = True if incarcerated == 'True' else False
 
         await write_game(game, BASE_PATH)
-        await interaction.response.send_message(f'Set incarceration status of {player.name} to {incarcerated}!', ephemeral=True)
+        await interaction.response.send_message(f'Set incarceration status of {this_player.player_discord_name} to {incarcerated}!', ephemeral=True)
 
 @tree.command(name="kill-player",
               description="Toggles a player status of being dead or not.",
               guild=discord.Object(id=GUILD_ID))
 @app_commands.default_permissions(manage_guild=True)
+@app_commands.autocomplete(player=player_list_autocomplete)
 async def kill_player(interaction: discord.Interaction,
-                     player: discord.Member,
-                     dead: Literal['True', 'False']):
+                      player: str,
+                      dead: Literal['True', 'False']):
     log_interaction_call(interaction)
     game = await get_game(BASE_PATH)
 
-    this_player = game.get_player(player.id)
+    this_player = game.get_player(int(player))
     if this_player is None:
-        await interaction.response.send_message(f'Player {player.name} is not currently defined in this game!',
-                                                ephemeral=True)
+        await interaction.response.send_message(f'The selected player is not currently defined in this game!',ephemeral=True)
     else:
         this_player.is_dead = True if dead == 'True' else False
 
         await write_game(game, BASE_PATH)
-        await interaction.response.send_message(f'Set alive status of {player.name} to {dead}!', ephemeral=True)
+        await interaction.response.send_message(f'Set alive status of {this_player.player_discord_name} to {dead}!', ephemeral=True)
 
 
 @tree.command(name="refresh-withdrawals",
@@ -285,22 +304,18 @@ async def deposit(interaction: discord.Interaction,
     elif player_faction is None:
         await interaction.response.send_message(f'Player {interaction.user.name} does not have a valid faction!', ephemeral=True)
     elif depositing_player.is_dead or depositing_player.is_incarcerated:
-        await interaction.response.send_message(f'Incarcerated or dead players cannot deposit assets!')
+        await interaction.response.send_message(f'Incarcerated or dead players cannot deposit assets!', ephemeral=True)
     else:
         if depositing_player.assets < amount:
-            await interaction.response.send_message(
-                f'Amount {amount} exceeds available assets of {depositing_player.assets}! Cannot deposit that amount!',
-                ephemeral=True)
+            await interaction.response.send_message(f'Amount {amount} exceeds available assets of {depositing_player.assets}! Cannot deposit that amount!', ephemeral=True)
             return
         else:
             depositing_player.set_assets(depositing_player.assets - amount)
             player_faction.set_assets(player_faction.assets + amount)
 
             await write_game(game, BASE_PATH)
-            await interaction.response.send_message(f'Deposited {amount} assets to {player_faction.faction_name}',
-                                                    ephemeral=True)
+            await interaction.response.send_message(f'Deposited {amount} assets to {player_faction.faction_name}', ephemeral=True)
             await interaction.followup.send(f'Current personal assets are {depositing_player.assets}', ephemeral=True)
-
 
 @tree.command(name="withdraw",
               description="Withdraw assets from your faction's holdings into your personal stash",
@@ -322,33 +337,30 @@ async def withdraw(interaction: discord.Interaction,
     if withdrawing_player is None:
         await interaction.response.send_message(f'Player {interaction.user.name} is not currently defined in this game!', ephemeral=True)
     elif player_faction is None:
-        await interaction.response.send_message(f'Player {interaction.user.name} does not have a valid faction!',ephemeral=True)
+        await interaction.response.send_message(f'Player {interaction.user.name} does not have a valid faction!', ephemeral=True)
     elif withdrawing_player.is_dead or withdrawing_player.is_incarcerated:
-        await interaction.response.send_message(f'Incarcerated or dead players cannot deposit assets!')
+        await interaction.response.send_message(f'Incarcerated or dead players cannot withdraw assets!', ephemeral=True)
     else:
         if player_faction.assets < amount:
-            await interaction.response.send_message(
-                f'Amount {amount} exceeds available assets of {player_faction.assets}! Cannot withdraw that amount!',
-                ephemeral=True)
+            await interaction.response.send_message(f'Amount {amount} exceeds available assets of {player_faction.assets}! Cannot withdraw that amount!', ephemeral=True)
         elif not withdrawing_player.daily_withdraw_available:
-            await interaction.response.send_message(f'No remaining withdrawals available for this phase!',
-                                                    ephemeral=True)
+            await interaction.response.send_message(f'No remaining withdrawals available for this phase!', ephemeral=True)
         else:
             withdrawing_player.daily_withdraw_available = False
             player_faction.set_assets(player_faction.assets - amount)
             withdrawing_player.set_assets(withdrawing_player.assets + amount)
 
             await write_game(game, BASE_PATH)
-            await interaction.response.send_message(
-                f'Withdrew {amount} assets from {player_faction.faction_name} holdings!', ephemeral=True)
+            await interaction.response.send_message(f'Withdrew {amount} assets from {player_faction.faction_name} holdings!', ephemeral=True)
             await interaction.followup.send(f'Current personal assets are {withdrawing_player.assets}', ephemeral=True)
 
 @tree.command(name="transfer",
               description="Transfer assets from your personal stash to another player",
               guild=discord.Object(id=GUILD_ID))
 @app_commands.checks.cooldown(1, 5, key=lambda i: i.guild_id)
+@app_commands.autocomplete(player=player_list_autocomplete)
 async def transfer(interaction: discord.Interaction,
-                   player: discord.Member,
+                   player: str,
                    amount: app_commands.Range[int, 0, 20]):
     log_interaction_call(interaction)
     game = await get_game(BASE_PATH)
@@ -359,15 +371,14 @@ async def transfer(interaction: discord.Interaction,
         return
 
     sending_player = game.get_player(interaction.user.id)
-    receiving_player = game.get_player(player.id)
+    receiving_player = game.get_player(int(player))
 
     if sending_player is None:
         await interaction.response.send_message(
             f'Player {interaction.user.name} is not currently defined in this game!', ephemeral=True)
         return
     elif receiving_player is None:
-        await interaction.response.send_message(f'Player {player.name} is not currently defined in this game!',
-                                                ephemeral=True)
+        await interaction.response.send_message(f'The selected player is not currently defined in this game!', ephemeral=True)
         return
     elif sending_player.is_dead or sending_player.is_incarcerated:
         await interaction.response.send_message(f'Incarcerated or dead players cannot send or receive assets!')
@@ -386,7 +397,7 @@ async def transfer(interaction: discord.Interaction,
             receiving_player.set_assets(receiving_player.assets + amount)
 
             await write_game(game, BASE_PATH)
-            await interaction.response.send_message(f'Transferred {amount} assets to {player.name}', ephemeral=True)
+            await interaction.response.send_message(f'Transferred {amount} assets to {receiving_player.player_discord_name}', ephemeral=True)
             await interaction.followup.send(f'Current personal assets are {sending_player.assets}', ephemeral=True)
 
 @tree.command(name="balance",
@@ -405,18 +416,18 @@ async def balance(interaction: discord.Interaction,
     requesting_player = game.get_player(interaction.user.id)
 
     if of_type == "Player":
-        if requesting_player is None:
+        if requesting_player is None or requesting_player.is_dead:
             await interaction.response.send_message(f'Player {interaction.user.name} was not found in this game!', ephemeral=True)
         else:
             await interaction.response.send_message(f'Current personal assets for player {interaction.user.name} is {requesting_player.assets}', ephemeral=True)
 
     elif of_type == "Tension":
-        if requesting_player is None:
+        if requesting_player is None or requesting_player.is_dead:
             await interaction.response.send_message(f'Player {interaction.user.name} was not found in this game!', ephemeral=True)
         else:
             await interaction.response.send_message(f'Current tension level for player {interaction.user.name} is {requesting_player.tension}', ephemeral=True)
     else:
-        if requesting_player is None:
+        if requesting_player is None or requesting_player.is_dead:
             await interaction.response.send_message(f'Player {interaction.user.name} was not found in this game!', ephemeral=True)
             return
         elif not requesting_player.is_faction_boss:
@@ -429,23 +440,47 @@ async def balance(interaction: discord.Interaction,
         else:
             await interaction.response.send_message(f'Current faction holdings for Faction {requested_faction.faction_name} is {requested_faction.assets}', ephemeral=True)
 
-@tree.command(name="role-player-test",
-              description="Select only a specific player from a list",
+@tree.command(name="day-action",
+              description="Tracks and notifies moderators of day action submissions that have a cost associated with them",
               guild=discord.Object(id=GUILD_ID))
-@app_commands.autocomplete(player=player_list_autocomplete)
-async def role_player_test(interaction: discord.Interaction,
-                           player: str):
+@app_commands.checks.cooldown(1, 5, key=lambda i: i.guild_id)
+async def day_action(interaction: discord.Interaction,
+                     action: str,
+                     cost: app_commands.Range[int, 0, 20]):
     log_interaction_call(interaction)
+    game = await get_game(BASE_PATH)
 
-    await interaction.response.send_message(f'Got player {player}!', ephemeral=True)
+    if not game.is_active:
+        await interaction.response.send_message(f'The bot has been put in an inactive state by the moderator. Please try again later.', ephemeral=True)
+        return
 
+    requesting_player = game.get_player(interaction.user.id)
+
+    if requesting_player is None:
+        await interaction.response.send_message(f'Player {interaction.user.name} is not currently defined in this game!', ephemeral=True)
+        return
+    elif requesting_player.is_dead or requesting_player.is_incarcerated:
+        await interaction.response.send_message(f'Incarcerated or dead players cannot use actions!')
+        return
+    else:
+        if requesting_player.assets < cost:
+            await interaction.response.send_message(f'Amount {cost} exceeds available assets of {requesting_player.assets}! Cannot perform this action!', ephemeral=True)
+            return
+        else:
+            mod_action_channel = interaction.guild.get_channel(MODERATOR_ACTION_CHANNEL)
+
+            requesting_player.set_assets(requesting_player.assets - cost)
+            await write_game(game, BASE_PATH)
+            await interaction.response.send_message(f'Submitted request for action {action} at a cost of {cost} assets', ephemeral=True)
+            await mod_action_channel.send(f'<@&{MODERATOR_ROLE_ID}>\nPlayer **{requesting_player.player_discord_name}** has submitted an action request of **{action}** and has paid **{cost}** assets')
 
 @tree.command(name="vote-player",
               description="Votes for a particular player",
               guild=discord.Object(id=GUILD_ID))
 @app_commands.checks.cooldown(1, 5, key=lambda i: i.guild_id)
+@app_commands.autocomplete(player=player_list_autocomplete)
 async def vote_player(interaction: discord.Interaction,
-                      player: Optional[discord.Member] = None,
+                      player: Optional[str] = None,
                       other: Optional[Literal['No Vote', 'Unvote']] = None):
     log_interaction_call(interaction)
     game = await get_game(BASE_PATH)
@@ -454,17 +489,25 @@ async def vote_player(interaction: discord.Interaction,
         await interaction.response.send_message(f'The bot has been put in an inactive state by the moderator. Please try again later.', ephemeral=True)
         return
 
+    if player is not None and other is not None:
+        await interaction.response.send_message(f'You may select only one of the arguments player or other, you cannot select both. Please resubmit your vote.', ephemeral=True)
+        return
+
     latest_round = game.get_latest_round()
     if latest_round is None or not latest_round.is_active_round:
         await interaction.response.send_message(f'No currently active round found for this game!', ephemeral=True)
         return
 
     requesting_player = game.get_player(interaction.user.id)
-    if requesting_player is None:
+    if requesting_player is None or requesting_player.is_dead:
         await interaction.response.send_message(f'Player {interaction.user.name} was not found in this game!', ephemeral=True)
         return
 
-    voted_player = None if player is None else game.get_player(player.id)
+    if player is not None and player not in game.get_living_player_ids():
+        await interaction.response.send_message(f'Invalid player selection! Please resubmit your vote.', ephemeral=True)
+        return
+
+    voted_player = None if player is None else game.get_player(int(player))
 
     if voted_player is not None and voted_player.is_dead:
         await interaction.response.send_message(f'Player {voted_player.player_discord_name} is dead and cannot be voted!', ephemeral=True)
@@ -478,19 +521,19 @@ async def vote_player(interaction: discord.Interaction,
 
         if voted_player is None and other is not None:
             if round_current_player_vote is None and other != 'Unvote':
-                latest_round.add_vote(Vote(requesting_player.player_id, other, time.time()))
+                latest_round.add_vote(Vote(requesting_player.player_id, other, round(time.time())))
             else:
                 if other == 'Unvote':
                     latest_round.remove_vote(round_current_player_vote)
                 else:
                     round_current_player_vote.choice = other
-                    round_current_player_vote.timestamp = time.time()
+                    round_current_player_vote.timestamp = round(time.time())
         else:
             if round_current_player_vote is None:
-                latest_round.add_vote(Vote(requesting_player.player_id, str(voted_player.player_id), time.time()))
+                latest_round.add_vote(Vote(requesting_player.player_id, str(voted_player.player_id), round(time.time())))
             else:
                 round_current_player_vote.choice = str(voted_player.player_id)
-                round_current_player_vote.timestamp = time.time()
+                round_current_player_vote.timestamp = round(time.time())
 
         await write_game(game, BASE_PATH)
 
@@ -499,6 +542,17 @@ async def vote_player(interaction: discord.Interaction,
         else:
             success_vote_target = other
         await interaction.response.send_message(f'Registered vote for {success_vote_target}!', ephemeral=True)
+
+        vote_channel = interaction.guild.get_channel(VOTE_CHANNEL)
+
+        response_value = voted_player.player_discord_name if voted_player is not None else other
+
+        if vote_channel is not None:
+            await interaction.followup.send(f'Sending public vote announcement in channel #{vote_channel}', ephemeral=True)
+            await vote_channel.send(f'Player **{requesting_player.player_discord_name}** has submitted a vote for **{response_value}**')
+        else:
+            await interaction.followup.send(f'Sending public vote results now...', ephemeral=True)
+            await interaction.followup.send(f'Player **{requesting_player.player_discord_name}** has submitted a vote for **{response_value}**', ephemeral=False)
 
 @tree.command(name="vote-report",
               description="Generates a report of current voting totals",
@@ -547,7 +601,15 @@ async def vote_report(interaction: discord.Interaction,
         formatted_votes += "\n"
     formatted_votes += "```\n"
 
-    await interaction.response.send_message(formatted_votes, ephemeral=False)
+    vote_channel = interaction.guild.get_channel(VOTE_CHANNEL)
+
+    if vote_channel is not None:
+        await interaction.response.send_message(f'Sending query response in channel ', ephemeral=True)
+        await vote_channel.send(formatted_votes)
+    else:
+        await interaction.response.send_message(f'Sending vote results now...', ephemeral=True)
+        await interaction.followup.send(formatted_votes, ephemeral=False)
+
     #With History to-be-implemented
 
 
