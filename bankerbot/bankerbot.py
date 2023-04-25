@@ -23,12 +23,12 @@ game_factions = Literal["Van der Linde Gang",
                         "O'Driscoll Boys",
                         "Lemoyne Raiders",
                         "Del Lobo Gang",
-                        "Wapiti Indians",
                         "Pinkerton Detective Agency",
                         "Robber Baron - Cornwall",
                         "Robber Baron - Bronte",
                         "Robber Baron - Braithwaite",
-                        "Robber Baron - Gray"]
+                        "Robber Baron - Gray",
+                        "Robber Baron - Fussar"]
 
 embed_choices = embed_builder.build_embeds()
 
@@ -52,18 +52,20 @@ async def player_list_autocomplete(interaction: discord.Interaction,
                                    current: str,
                              ) -> List[app_commands.Choice[str]]:
     game = await get_game(BASE_PATH)
-    players = await get_valid_players(game.players)
+    players = await get_valid_players(current, game.players)
     return [
         app_commands.Choice(name=player.player_discord_name, value=str(player.player_id))
         for player in players
     ]
 
-async def get_valid_players(players: List[Player]) -> List[Player]:
+async def get_valid_players(substr: str, players: List[Player]) -> List[Player]:
     player_list = []
     for player in sorted(players, key=lambda e: e.player_discord_name.lower()):
+        if substr and substr.lower() not in player.player_discord_name.lower():
+            continue
         if not player.is_dead:
             player_list.append(player)
-    return player_list
+    return player_list[:25]
 
 @tree.command(name="toggle-activity",
               description="Enables/Disables bot commands for players",
@@ -342,7 +344,9 @@ async def withdraw(interaction: discord.Interaction,
         await interaction.response.send_message(f'Incarcerated or dead players cannot withdraw assets!', ephemeral=True)
     else:
         if player_faction.assets < amount:
-            await interaction.response.send_message(f'Amount {amount} exceeds available assets of {player_faction.assets}! Cannot withdraw that amount!', ephemeral=True)
+            await interaction.response.send_message(f'Amount {amount} exceeds available assets! Cannot withdraw that amount!', ephemeral=True)
+        elif amount > withdrawing_player.withdraw_limit:
+            await interaction.response.send_message(f'Amount {amount} exceeds withdrawal limit of {withdrawing_player.withdraw_limit}! Cannot Withdraw that amount!', ephemeral=True)
         elif not withdrawing_player.daily_withdraw_available:
             await interaction.response.send_message(f'No remaining withdrawals available for this phase!', ephemeral=True)
         else:
@@ -409,9 +413,9 @@ async def balance(interaction: discord.Interaction,
     log_interaction_call(interaction)
     game = await get_game(BASE_PATH)
 
-    if not game.is_active:
-        await interaction.response.send_message(f'The bot has been put in an inactive state by the moderator. Please try again later.', ephemeral=True)
-        return
+    # if not game.is_active:
+    #     await interaction.response.send_message(f'The bot has been put in an inactive state by the moderator. Please try again later.', ephemeral=True)
+    #     return
 
     requesting_player = game.get_player(interaction.user.id)
 
