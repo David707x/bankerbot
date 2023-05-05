@@ -267,7 +267,7 @@ async def kill_player(interaction: discord.Interaction,
         await write_game(game, BASE_PATH)
         await interaction.response.send_message(f'Set dead status of {this_player.player_discord_name} to {dead}!', ephemeral=True)
 
-
+'''
 @tree.command(name="refresh-withdrawals",
               description="Toggles a player status of being dead or not.",
               guild=discord.Object(id=GUILD_ID))
@@ -477,7 +477,7 @@ async def day_action(interaction: discord.Interaction,
             await write_game(game, BASE_PATH)
             await interaction.response.send_message(f'Submitted request for action {action} at a cost of {cost} assets', ephemeral=True)
             await mod_action_channel.send(f'<@&{MODERATOR_ROLE_ID}>\nPlayer **{requesting_player.player_discord_name}** has submitted an action request of **{action}** and has paid **{cost}** assets')
-
+'''
 @tree.command(name="vote-player",
               description="Votes for a particular player",
               guild=discord.Object(id=GUILD_ID))
@@ -554,6 +554,39 @@ async def vote_player(interaction: discord.Interaction,
         if vote_channel is not None:
             await interaction.followup.send(f'Sending public vote announcement in channel #{vote_channel}', ephemeral=True)
             await vote_channel.send(f'Player **{requesting_player.player_discord_name}** has submitted a vote for **{response_value}**')
+            report_round = latest_round
+            vote_dict = {}
+
+            for vote in report_round.votes:
+                if vote.choice in vote_dict.keys():
+                    vote_dict.get(vote.choice).append(vote.player_id)
+                else:
+                    vote_dict[vote.choice] = [vote.player_id]
+
+            formatted_votes = f"**Vote Totals for round {report_round.round_number} as of <t:{int(time.time())}>**\n"
+            formatted_votes += "```\n"
+            for key, value in sorted(vote_dict.items(), key=lambda e: len(e[1]), reverse=True):
+                if key == 'No Vote':
+                    formatted_votee = key
+                else:
+                    formatted_votee = game.get_player(int(key)).player_discord_name
+                formatted_votes += f"{formatted_votee}: {len(value)} vote(s)\n"
+                formatted_votes += f"    Voted By: "
+                for player_id in value:
+                    formatted_voter = game.get_player(int(player_id)).player_discord_name
+                    formatted_votes += f"{formatted_voter}, "
+                formatted_votes = formatted_votes.rstrip(', ')
+                formatted_votes += "\n"
+            formatted_votes += "```\n"
+
+            vote_channel = interaction.guild.get_channel(VOTE_CHANNEL)
+
+            if vote_channel is not None:
+                # await interaction.response.send_message(f'Sending query response in channel ', ephemeral=True)
+                await vote_channel.send(formatted_votes)
+            else:
+                # await interaction.response.send_message(f'Sending vote results now...', ephemeral=True)
+                await interaction.followup.send(formatted_votes, ephemeral=False)
         else:
             await interaction.followup.send(f'Sending public vote results now...', ephemeral=True)
             await interaction.followup.send(f'Player **{requesting_player.player_discord_name}** has submitted a vote for **{response_value}**', ephemeral=False)
