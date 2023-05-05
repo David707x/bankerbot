@@ -265,7 +265,7 @@ async def kill_player(interaction: discord.Interaction,
         this_player.is_dead = True if dead == 'True' else False
 
         await write_game(game, BASE_PATH)
-        await interaction.response.send_message(f'Set alive status of {this_player.player_discord_name} to {dead}!', ephemeral=True)
+        await interaction.response.send_message(f'Set dead status of {this_player.player_discord_name} to {dead}!', ephemeral=True)
 
 
 @tree.command(name="refresh-withdrawals",
